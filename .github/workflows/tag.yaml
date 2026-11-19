@@ -39,6 +39,8 @@ jobs:
         DOCKER_BUILD_ARGS: "--push --platform linux/amd64,linux/arm64"
         DOCKER_REPO: "${{ github.repository_owner }}/doc2vec"
       run: |
+        # image names must be lowercase; repository_owner keeps the account's casing
+        export DOCKER_REPO=$(echo "$DOCKER_REPO" | tr '[:upper:]' '[:lower:]')
         # if workflow_dispatch is used, use the version input
         if [ -n "${{ github.event.inputs.version }}" ]; then
           export VERSION=${{ github.event.inputs.version }}
