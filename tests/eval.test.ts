@@ -3,9 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import BetterSqlite3 from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     computeMetrics,
+    createOpenRouterReranker,
     createSqliteRetriever,
     firstRelevantRank,
     formatReport,
@@ -223,5 +224,26 @@ describe('runEval against sqlite-vec', () => {
             { embed, retrieve: createSqliteRetriever() },
             { topK: 1, model: 'fake' }
         )).rejects.toThrow(/No database/);
+    });
+});
+
+describe('OpenRouter reranker', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('sends the MCP server request and maps scores back to input order', async () => {
+        const body = { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.1 }] };
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const rerank = createOpenRouterReranker('test-key', 'cohere/rerank-v3.5');
+        await expect(rerank('install helm', ['a', 'b'])).resolves.toEqual([0.1, 0.9]);
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+        expect(url).toBe('https://openrouter.ai/api/v1/rerank');
+        expect(JSON.parse(String(init.body))).toEqual({ model: 'cohere/rerank-v3.5', query: 'install helm', documents: ['a', 'b'], top_n: 2 });
+        expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-key');
+    });
+
+    it('rejects a missing document score', async () => {
+        vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ results: [{ index: 0, relevance_score: 1 }] }), { status: 200 }));
+        await expect(createOpenRouterReranker('k', 'm')('q', ['a', 'b'])).rejects.toThrow(/one score per document/);
     });
 });

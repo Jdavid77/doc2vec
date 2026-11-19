@@ -85,6 +85,32 @@ export function createDeepInfraReranker(apiKey: string, model: string = DEFAULT_
     };
 }
 
+// Same request the MCP server's OpenRouter reranker sends (mcp/src/server.ts)
+export function createOpenRouterReranker(apiKey: string, model: string): Rerank {
+    return async (query, documents) => {
+        const response = await fetch('https://openrouter.ai/api/v1/rerank', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ model, query, documents, top_n: documents.length }),
+        });
+        if (!response.ok) {
+            throw new Error(`reranker returned HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+        }
+        const body = await response.json() as { results?: { index?: unknown; relevance_score?: unknown }[] };
+        const scores = new Array<number>(documents.length).fill(NaN);
+        for (const result of Array.isArray(body.results) ? body.results : []) {
+            const index = Number(result.index);
+            if (Number.isInteger(index) && index >= 0 && index < documents.length) {
+                scores[index] = Number(result.relevance_score);
+            }
+        }
+        if (scores.some(Number.isNaN)) {
+            throw new Error('reranker did not return one score per document');
+        }
+        return scores;
+    };
+}
+
 export type Embed = (text: string) => Promise<number[]>;
 export type Retrieve = (queryEmbedding: number[], evalCase: EvalCase, topK: number) => Promise<RetrievedChunk[]>;
 
@@ -367,10 +393,18 @@ export async function runEvalCommand(options: {
     }
     let rerank: Rerank | undefined;
     if (options.rerank) {
-        if (options.rerank !== 'deepinfra') throw new Error(`Unknown reranker '${options.rerank}': use deepinfra`);
-        const apiKey = process.env.DEEPINFRA_API_KEY;
-        if (!apiKey) throw new Error('--rerank deepinfra requires the DEEPINFRA_API_KEY environment variable');
-        rerank = createDeepInfraReranker(apiKey, options.rerankModel);
+        if (options.rerank === 'deepinfra') {
+            const apiKey = process.env.DEEPINFRA_API_KEY;
+            if (!apiKey) throw new Error('--rerank deepinfra requires the DEEPINFRA_API_KEY environment variable');
+            rerank = createDeepInfraReranker(apiKey, options.rerankModel);
+        } else if (options.rerank === 'openrouter') {
+            const apiKey = process.env.OPENROUTER_API_KEY;
+            if (!apiKey) throw new Error('--rerank openrouter requires the OPENROUTER_API_KEY environment variable');
+            if (!options.rerankModel) throw new Error('--rerank openrouter requires --rerank-model (e.g. cohere/rerank-v3.5)');
+            rerank = createOpenRouterReranker(apiKey, options.rerankModel);
+        } else {
+            throw new Error(`Unknown reranker '${options.rerank}': use deepinfra or openrouter`);
+        }
     }
     let embeddingConfig: EmbeddingConfig | undefined;
     if (options.configPath) {

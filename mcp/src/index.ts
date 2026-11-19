@@ -19,7 +19,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs'; // Import fs for checking file existence
-import { createQueryHandlers, createSqliteDbProvider, createQdrantProvider, createDeepInfraReranker, DEFAULT_RERANK_MODEL, DEFAULT_RERANK_CANDIDATES, type Rerank } from './server.js';
+import { createQueryHandlers, createSqliteDbProvider, createQdrantProvider, createDeepInfraReranker, createOpenRouterReranker, DEFAULT_RERANK_MODEL, DEFAULT_RERANK_CANDIDATES, type Rerank } from './server.js';
 
 // --- Configuration & Environment Check ---
 
@@ -79,9 +79,21 @@ const envFlag = (name: string, fallback: boolean): boolean => {
 };
 const onePerPageEnabled = envFlag('ONE_CHUNK_PER_PAGE', false);
 const hybridSearchEnabled = envFlag('HYBRID_SEARCH', false);
-const rerankerProvider = (process.env.RERANKER || '').trim().toLowerCase();  // '' (off) or 'deepinfra'
+const rerankerProvider = (process.env.RERANKER || '').trim().toLowerCase();  // '' (off), 'deepinfra' or 'openrouter'
 const deepInfraApiKey = process.env.DEEPINFRA_API_KEY;
-const rerankModel = process.env.RERANK_MODEL || DEFAULT_RERANK_MODEL;
+const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+// Overrides the provider's API base, e.g. a gateway that adds the credentials itself
+const rerankBaseUrl = process.env.RERANK_BASE_URL || undefined;
+// DEFAULT_RERANK_MODEL is a DeepInfra model; OpenRouter needs RERANK_MODEL set
+const rerankModel = process.env.RERANK_MODEL || (rerankerProvider === 'deepinfra' ? DEFAULT_RERANK_MODEL : '');
+const rerankApiKey = rerankerProvider === 'deepinfra' ? deepInfraApiKey : rerankerProvider === 'openrouter' ? openRouterApiKey : undefined;
+// Why reranking can't be enabled, or '' when it can
+const rerankProblem =
+    !rerankerProvider ? ''
+    : rerankerProvider !== 'deepinfra' && rerankerProvider !== 'openrouter' ? `Unknown RERANKER '${rerankerProvider}'. Supported: deepinfra, openrouter`
+    : !rerankApiKey && !rerankBaseUrl ? `RERANKER=${rerankerProvider} requires ${rerankerProvider === 'deepinfra' ? 'DEEPINFRA_API_KEY' : 'OPENROUTER_API_KEY'}, or RERANK_BASE_URL pointing at a gateway that adds credentials`
+    : !rerankModel ? `RERANKER=${rerankerProvider} requires RERANK_MODEL`
+    : '';
 const rerankCandidates = parseInt(process.env.RERANK_CANDIDATES || String(DEFAULT_RERANK_CANDIDATES), 10);
 const rerankTimeoutMs = parseInt(process.env.RERANK_TIMEOUT_MS || '10000', 10);
 
@@ -117,21 +129,19 @@ if (strictMode) {
         process.exit(1);
     }
 
-    if (rerankerProvider && rerankerProvider !== 'deepinfra') {
-        console.error(`Error: Unknown RERANKER '${rerankerProvider}'. Supported: deepinfra`);
-        process.exit(1);
-    }
-    if (rerankerProvider === 'deepinfra' && !deepInfraApiKey) {
-        console.error("Error: RERANKER=deepinfra requires the DEEPINFRA_API_KEY environment variable.");
+    if (rerankProblem) {
+        console.error(`Error: ${rerankProblem}.`);
         process.exit(1);
     }
 }
 
 let rerank: Rerank | undefined;
-if (rerankerProvider === 'deepinfra' && deepInfraApiKey) {
-    rerank = createDeepInfraReranker({ apiKey: deepInfraApiKey, model: rerankModel, timeoutMs: rerankTimeoutMs });
-} else if (rerankerProvider) {
-    console.error(`Warning: reranking disabled: RERANKER='${rerankerProvider}' needs ${rerankerProvider === 'deepinfra' ? 'DEEPINFRA_API_KEY' : 'a supported value (deepinfra)'}.`);
+if (rerankProblem) {
+    console.error(`Warning: reranking disabled: ${rerankProblem}.`);
+} else if (rerankerProvider === 'deepinfra') {
+    rerank = createDeepInfraReranker({ apiKey: rerankApiKey, model: rerankModel, baseUrl: rerankBaseUrl, timeoutMs: rerankTimeoutMs });
+} else if (rerankerProvider === 'openrouter') {
+    rerank = createOpenRouterReranker({ apiKey: rerankApiKey, model: rerankModel, baseUrl: rerankBaseUrl, timeoutMs: rerankTimeoutMs });
 }
 
 async function createEmbeddings(text: string): Promise<number[]> {

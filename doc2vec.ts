@@ -2157,8 +2157,8 @@ if (require.main === module) {
         .option('--out <path>', 'write the full JSON report here')
         .option('--mode <mode>', "retrieval: 'dense' (vector, as the MCP server), 'bm25' (keyword) or 'hybrid' (both, fused with RRF)", 'dense')
         .option('--per-page', 'keep only the best chunk of each page in the results', false)
-        .option('--rerank <provider>', "rerank the top candidates: 'deepinfra' (needs DEEPINFRA_API_KEY)")
-        .option('--rerank-model <model>', 'reranker model (default: nvidia/Nemotron-3.5-Rerank-8B-BF16)')
+        .option('--rerank <provider>', "rerank the top candidates: 'deepinfra' (needs DEEPINFRA_API_KEY) or 'openrouter' (needs OPENROUTER_API_KEY and --rerank-model)")
+        .option('--rerank-model <model>', 'reranker model (default for deepinfra: nvidia/Nemotron-3.5-Rerank-8B-BF16)')
         .option('--rerank-candidates <n>', 'how many top chunks the reranker sees (default: 40)', (v: string) => parseInt(v, 10))
         .action(async (casesPath: string, options: {
             db?: string; config?: string; topK: number; out?: string; mode: string; perPage: boolean;

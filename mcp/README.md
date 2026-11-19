@@ -51,9 +51,11 @@ The server automatically detects the database schema and adapts its queries acco
 | `PORT` | Port to run the server on (HTTP/SSE transports only) | 3001 |
 | `ONE_CHUNK_PER_PAGE` | Return at most one chunk per page (the best one) | `false` |
 | `HYBRID_SEARCH` | Fuse vector search with keyword (BM25) search. On Qdrant, needs collections ingested with `keyword_index: true` | `false` |
-| `RERANKER` | Rerank the top candidates: `deepinfra`, or unset for none | - |
-| `DEEPINFRA_API_KEY` | DeepInfra API key (required when `RERANKER=deepinfra`) | - |
-| `RERANK_MODEL` | DeepInfra reranker model | `nvidia/Nemotron-3.5-Rerank-8B-BF16` |
+| `RERANKER` | Rerank the top candidates: `deepinfra`, `openrouter`, or unset for none | - |
+| `DEEPINFRA_API_KEY` | DeepInfra API key (required when `RERANKER=deepinfra`, unless `RERANK_BASE_URL` is set) | - |
+| `OPENROUTER_API_KEY` | OpenRouter API key (required when `RERANKER=openrouter`, unless `RERANK_BASE_URL` is set) | - |
+| `RERANK_MODEL` | Reranker model. Required for `openrouter` (e.g. `cohere/rerank-v3.5`) | `nvidia/Nemotron-3.5-Rerank-8B-BF16` (`deepinfra`) |
+| `RERANK_BASE_URL` | Overrides the provider's API base, e.g. an AI gateway that adds the credentials, which makes the API key optional. `openrouter` posts to `<base>/rerank`, `deepinfra` to `<base>/<model>` | `https://openrouter.ai/api/v1` (`openrouter`), `https://api.deepinfra.com/v1/inference` (`deepinfra`) |
 | `RERANK_CANDIDATES` | How many top candidates the reranker scores | `40` |
 | `RERANK_TIMEOUT_MS` | Reranker request timeout; on timeout or error results keep their retrieval order | `10000` |
 

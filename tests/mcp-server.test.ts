@@ -7,6 +7,7 @@ import * as sqliteVec from 'sqlite-vec';
 import { describe, expect, it, vi } from 'vitest';
 import {
     createDeepInfraReranker,
+    createOpenRouterReranker,
     createQueryHandlers,
     createQdrantProvider,
     createSqliteDbProvider,
@@ -538,6 +539,45 @@ describe('DeepInfra reranker', () => {
         await expect(failing('q', ['a'])).rejects.toThrow(/HTTP 503/);
         const short = createDeepInfraReranker({
             apiKey: 'k', fetch: (async () => new Response(JSON.stringify({ scores: [1] }), { status: 200 })) as unknown as typeof fetch,
+        });
+        await expect(short('q', ['a', 'b'])).rejects.toThrow(/one score per document/);
+    });
+});
+
+describe('OpenRouter reranker', () => {
+    it('sends the query and documents and maps scores back to input order', async () => {
+        const body = { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.1 }] };
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+        const rerank = createOpenRouterReranker({ apiKey: 'test-key', model: 'cohere/rerank-v3.5', fetch: fetchMock as unknown as typeof fetch });
+        await expect(rerank('install helm', ['a', 'b'])).resolves.toEqual([0.1, 0.9]);
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+        expect(url).toBe('https://openrouter.ai/api/v1/rerank');
+        expect(JSON.parse(String(init.body))).toEqual({ model: 'cohere/rerank-v3.5', query: 'install helm', documents: ['a', 'b'], top_n: 2 });
+        expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-key');
+    });
+
+    it('posts to a custom base URL without an API key, e.g. through a gateway', async () => {
+        const body = { results: [{ index: 0, relevance_score: 0.5 }] };
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+        const rerank = createOpenRouterReranker({
+            model: 'cohere/rerank-v3.5', baseUrl: 'http://llm.automation.svc.cluster.local/v1/',
+            fetch: fetchMock as unknown as typeof fetch,
+        });
+        await expect(rerank('q', ['a'])).resolves.toEqual([0.5]);
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+        expect(url).toBe('http://llm.automation.svc.cluster.local/v1/rerank');
+        expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    });
+
+    it('rejects an HTTP error or a missing document score', async () => {
+        const failing = createOpenRouterReranker({
+            apiKey: 'k', model: 'm',
+            fetch: (async () => new Response('busy', { status: 503 })) as unknown as typeof fetch,
+        });
+        await expect(failing('q', ['a'])).rejects.toThrow(/HTTP 503/);
+        const short = createOpenRouterReranker({
+            apiKey: 'k', model: 'm',
+            fetch: (async () => new Response(JSON.stringify({ results: [{ index: 0, relevance_score: 1 }] }), { status: 200 })) as unknown as typeof fetch,
         });
         await expect(short('q', ['a', 'b'])).rejects.toThrow(/one score per document/);
     });

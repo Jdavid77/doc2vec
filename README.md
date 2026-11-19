@@ -509,6 +509,7 @@ Search methods can be compared on the same database without re-ingesting it:
 - `--mode hybrid`: dense and BM25 lists fused with Reciprocal Rank Fusion.
 - `--per-page`: keep only the best chunk of each page, so the top results cover more pages.
 - `--rerank deepinfra`: rerank the top `--rerank-candidates` chunks (default 40) with `--rerank-model` (default `nvidia/Nemotron-3.5-Rerank-8B-BF16`); needs `DEEPINFRA_API_KEY`.
+- `--rerank openrouter`: the same with OpenRouter's rerank API; needs `OPENROUTER_API_KEY` and `--rerank-model` (e.g. `cohere/rerank-v3.5`).
 
 These match the MCP server's retrieval settings (`HYBRID_SEARCH`, `ONE_CHUNK_PER_PAGE`, `RERANKER`; see `mcp/README.md`), so a configuration can be measured before it is deployed.
 

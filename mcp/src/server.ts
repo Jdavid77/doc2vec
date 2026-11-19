@@ -175,9 +175,15 @@ export function toFtsQuery(text: string): string {
     return [...new Set(terms)].map((t) => `"${t}"`).join(' OR ');
 }
 
+function rerankHeaders(apiKey?: string): Record<string, string> {
+    return apiKey
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
+        : { 'Content-Type': 'application/json' };
+}
+
 // DeepInfra's inference API: one query, its candidate documents, one score each
 export function createDeepInfraReranker(deps: {
-    apiKey: string;
+    apiKey?: string;  // optional when baseUrl is a gateway that adds credentials
     model?: string;
     baseUrl?: string;
     timeoutMs?: number;
@@ -192,7 +198,7 @@ export function createDeepInfraReranker(deps: {
         try {
             const response = await doFetch(`${baseUrl}/${model}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${deps.apiKey}` },
+                headers: rerankHeaders(deps.apiKey),
                 body: JSON.stringify({ queries: [query], documents }),
                 signal: controller.signal,
             });
@@ -204,6 +210,49 @@ export function createDeepInfraReranker(deps: {
                 throw new Error('reranker did not return one score per document');
             }
             return body.scores.map(Number);
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+}
+
+// OpenRouter's rerank API: results come back sorted by relevance, each with
+// the index of its input document, so scores are mapped back to input order
+export function createOpenRouterReranker(deps: {
+    apiKey?: string;  // optional when baseUrl is a gateway that adds credentials
+    model: string;
+    baseUrl?: string;
+    timeoutMs?: number;
+    fetch?: typeof fetch;
+}): Rerank {
+    const baseUrl = (deps.baseUrl ?? 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+    const doFetch = deps.fetch ?? fetch;
+    return async (query, documents) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? 10000);
+        try {
+            const response = await doFetch(`${baseUrl}/rerank`, {
+                method: 'POST',
+                headers: rerankHeaders(deps.apiKey),
+                // top_n set explicitly so every document gets a score
+                body: JSON.stringify({ model: deps.model, query, documents, top_n: documents.length }),
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                throw new Error(`reranker returned HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+            }
+            const body = await response.json() as { results?: { index?: unknown; relevance_score?: unknown }[] };
+            const scores = new Array<number>(documents.length).fill(NaN);
+            for (const result of Array.isArray(body.results) ? body.results : []) {
+                const index = Number(result.index);
+                if (Number.isInteger(index) && index >= 0 && index < documents.length) {
+                    scores[index] = Number(result.relevance_score);
+                }
+            }
+            if (scores.some(Number.isNaN)) {
+                throw new Error('reranker did not return one score per document');
+            }
+            return scores;
         } finally {
             clearTimeout(timer);
         }
